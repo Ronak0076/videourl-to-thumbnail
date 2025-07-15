@@ -3,11 +3,15 @@ const ffmpeg = require('fluent-ffmpeg');
 const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
 const path = require('path');
 const { URL } = require('url');
+const tmp = require('tmp');
+const fs = require('fs');
+const https = require('https');
+const http = require('http');
+
+ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
 // Middleware
 app.use(express.json());
@@ -17,8 +21,8 @@ app.use(express.static('public'));
 // CORS
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.sendStatus(200);
   next();
 });
@@ -34,13 +38,42 @@ function getFilenameFromUrl(videoUrl) {
   }
 }
 
-// Generate thumbnail from video URL
-function generateThumbnailBase64(videoUrl) {
+// Download remote video to temp file
+function downloadVideo(videoUrl) {
   return new Promise((resolve, reject) => {
-    const filename = getFilenameFromUrl(videoUrl);
-    const chunks = [];
+    tmp.file({ postfix: '.mp4' }, (err, tmpPath, fd, cleanupCallback) => {
+      if (err) return reject(err);
 
+      const file = fs.createWriteStream(tmpPath);
+      const client = videoUrl.startsWith('https') ? https : http;
+
+      client.get(videoUrl, (response) => {
+        if (response.statusCode !== 200) {
+          cleanupCallback();
+          return reject(new Error(`Failed to download video: ${response.statusCode}`));
+        }
+
+        response.pipe(file);
+        file.on('finish', () => {
+          file.close(() => resolve({ tmpPath, cleanupCallback }));
+        });
+      }).on('error', (err) => {
+        cleanupCallback();
+        reject(err);
+      });
+    });
+  });
+}
+
+// Generate thumbnail from local video file
+async function generateThumbnailBase64(videoUrl) {
+  const { tmpPath, cleanupCallback } = await downloadVideo(videoUrl);
+  const filename = getFilenameFromUrl(videoUrl);
+  const chunks = [];
+
+  return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
+      cleanupCallback();
       reject({
         success: false,
         error: 'Thumbnail generation timeout',
@@ -48,20 +81,22 @@ function generateThumbnailBase64(videoUrl) {
       });
     }, 25000);
 
-    ffmpeg(videoUrl)
+    ffmpeg(tmpPath)
       .inputOptions('-ss 00:00:01.000')
-      .outputOptions(['-frames:v 1', '-f image2pipe', '-vcodec mjpeg'])
+      .outputOptions(['-frames:v 1', '-vf scale=320:-1', '-f image2pipe', '-vcodec mjpeg'])
       .format('mjpeg')
       .on('error', (err) => {
         clearTimeout(timeout);
+        cleanupCallback();
         reject({
           success: false,
-          error: 'Failed to generate thumbnail',
+          error: 'FFmpeg failed',
           details: err.message,
         });
       })
       .on('end', () => {
         clearTimeout(timeout);
+        cleanupCallback();
         const buffer = Buffer.concat(chunks);
         const base64Image = buffer.toString('base64');
         resolve({
@@ -76,7 +111,7 @@ function generateThumbnailBase64(videoUrl) {
   });
 }
 
-// UI route
+// Home page
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
@@ -86,20 +121,19 @@ app.get('/api/thumbnail', (req, res) => {
   res.status(405).json({
     success: false,
     error: 'Method Not Allowed',
-    message: 'Only POST method is allowed with videoUrl in JSON body.',
-    usage: {
-      method: 'POST',
-      url: '/api/thumbnail',
-      body: { videoUrl: 'https://example.com/video.mp4' },
-    },
+    message: 'Use POST with videoUrl in JSON body',
   });
 });
 
-// Thumbnail API
+// POST API to generate thumbnail
 app.post('/api/thumbnail', async (req, res) => {
   const { videoUrl } = req.body;
+
   if (!videoUrl) {
-    return res.status(400).json({ success: false, error: 'Video URL is required' });
+    return res.status(400).json({
+      success: false,
+      error: 'videoUrl is required',
+    });
   }
 
   try {
