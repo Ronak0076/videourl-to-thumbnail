@@ -1,0 +1,8 @@
+services:
+  - type: web
+    name: ffmpeg-thumbnail-server
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
