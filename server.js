@@ -66,44 +66,91 @@ function downloadVideo(videoUrl) {
 }
 
 // Generate thumbnail from local video file
+// async function generateThumbnailBase64(videoUrl) {
+//   const { tmpPath, cleanupCallback } = await downloadVideo(videoUrl);
+//   const filename = getFilenameFromUrl(videoUrl);
+//   const chunks = [];
+
+//   return new Promise((resolve, reject) => {
+//     const timeout = setTimeout(() => {
+//       cleanupCallback();
+//       reject({
+//         success: false,
+//         error: 'Thumbnail generation timeout',
+//         details: 'The process took too long to complete',
+//       });
+//     }, 25000);
+
+//     ffmpeg(tmpPath)
+//       .inputOptions('-ss 00:00:01.000')
+//       .outputOptions(['-frames:v 1', '-vf scale=320:-1', '-f image2pipe', '-vcodec mjpeg'])
+//       .format('mjpeg')
+//       .on('error', (err) => {
+//         clearTimeout(timeout);
+//         cleanupCallback();
+//         reject({
+//           success: false,
+//           error: 'FFmpeg failed',
+//           details: err.message,
+//         });
+//       })
+//       .on('end', () => {
+//         clearTimeout(timeout);
+//         cleanupCallback();
+//         const buffer = Buffer.concat(chunks);
+//         const base64Image = buffer.toString('base64');
+//         resolve({
+//           success: true,
+//           filename,
+//           base64: `data:image/jpeg;base64,${base64Image}`,
+//           message: 'Thumbnail generated successfully',
+//         });
+//       })
+//       .pipe()
+//       .on('data', (chunk) => chunks.push(chunk));
+//   });
+// }
+
 async function generateThumbnailBase64(videoUrl) {
-  const { tmpPath, cleanupCallback } = await downloadVideo(videoUrl);
   const filename = getFilenameFromUrl(videoUrl);
   const chunks = [];
 
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
-      cleanupCallback();
       reject({
         success: false,
         error: 'Thumbnail generation timeout',
-        details: 'The process took too long to complete',
+        details: 'The process took too long to complete'
       });
     }, 25000);
 
-    ffmpeg(tmpPath)
-      .inputOptions('-ss 00:00:01.000')
-      .outputOptions(['-frames:v 1', '-vf scale=320:-1', '-f image2pipe', '-vcodec mjpeg'])
+    ffmpeg(videoUrl)
+      .inputOptions('-ss 00:00:01') // seeking before decoding
+      .outputOptions([
+        '-frames:v 1',
+        '-vf scale=320:-1',
+        '-f image2pipe',
+        '-vcodec mjpeg'
+      ])
       .format('mjpeg')
+      .on('start', cmd => console.log('[FFmpeg Command]', cmd))
       .on('error', (err) => {
         clearTimeout(timeout);
-        cleanupCallback();
         reject({
           success: false,
           error: 'FFmpeg failed',
-          details: err.message,
+          details: err.message
         });
       })
       .on('end', () => {
         clearTimeout(timeout);
-        cleanupCallback();
         const buffer = Buffer.concat(chunks);
         const base64Image = buffer.toString('base64');
         resolve({
           success: true,
           filename,
           base64: `data:image/jpeg;base64,${base64Image}`,
-          message: 'Thumbnail generated successfully',
+          message: 'Thumbnail generated successfully'
         });
       })
       .pipe()
