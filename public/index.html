@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Video Thumbnail Generator</title>
+</head>
+<body>
+  <h1>FFmpeg Thumbnail Generator</h1>
+  <form id="form">
+    <input type="text" id="videoUrl" placeholder="Enter video URL" style="width: 300px;">
+    <button type="submit">Generate</button>
+  </form>
+  <div id="result" style="margin-top: 20px;"></div>
+
+  <script>
+    const form = document.getElementById('form');
+    const result = document.getElementById('result');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const videoUrl = document.getElementById('videoUrl').value;
+      result.innerHTML = 'Processing...';
+
+      const res = await fetch('/api/thumbnail', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoUrl })
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        result.innerHTML = `
+          <p><strong>${data.message}</strong></p>
+          <img src="${data.base64}" width="320" />
+        `;
+      } else {
+        result.innerHTML = `<p style="color:red;">Error: ${data.error}</p>`;
+      }
+    });
+  </script>
+</body>
+</html>
